@@ -2,7 +2,7 @@
 pragma solidity ^0.7.6;
 pragma experimental ABIEncoderV2;
 
-import {Test, console} from "forge-std/Test.sol";
+import {Test, console, stdError} from "forge-std/Test.sol";
 import {PuppyRaffle} from "../src/PuppyRaffle.sol";
 
 contract PuppyRaffleTest is Test {
@@ -16,11 +16,7 @@ contract PuppyRaffleTest is Test {
     uint256 duration = 1 days;
 
     function setUp() public {
-        puppyRaffle = new PuppyRaffle(
-            entranceFee,
-            feeAddress,
-            duration
-        );
+        puppyRaffle = new PuppyRaffle(entranceFee, feeAddress, duration);
     }
 
     //////////////////////
@@ -212,5 +208,44 @@ contract PuppyRaffleTest is Test {
         puppyRaffle.selectWinner();
         puppyRaffle.withdrawFees();
         assertEq(address(feeAddress).balance, expectedPrizeAmount);
+    }
+
+    //!!! AUDIT
+
+    function test_DoS_revert_exceeded_block_limit_on_enter_raffle() public {
+        uint256 numOfPlayers = 240;
+        address[] memory players = new address[](numOfPlayers);
+        for (uint256 i = 0; i < numOfPlayers; ++i) {
+            players[i] = address(uint160(i));
+        }
+        puppyRaffle.enterRaffle{value: entranceFee * numOfPlayers}(players);
+        address[] memory player = new address[](1);
+        player[0] = address(numOfPlayers + 1);
+        vm.expectRevert();
+        puppyRaffle.enterRaffle{value: entranceFee}(player);
+    }
+
+    function test_DoS_more_gas_on_enter_raffle_by_latest_user() public {
+        uint256 gasStartFirst = gasleft();
+        uint256 numOfPlayers = 100;
+        address[] memory playersFirst = new address[](numOfPlayers);
+        for (uint256 i = 0; i < numOfPlayers; ++i) {
+            playersFirst[i] = address(uint160(i));
+        }
+        puppyRaffle.enterRaffle{value: entranceFee * numOfPlayers}(playersFirst);
+        uint256 gasEndFirst = gasleft();
+        uint256 gasUsedFirst = gasStartFirst - gasEndFirst;
+
+        uint256 gasStartSecond = gasleft();
+        address[] memory playersSecond = new address[](numOfPlayers);
+        for (uint256 i = 0; i < numOfPlayers; ++i) {
+            playersSecond[i] = address(uint160(i + numOfPlayers));
+        }
+        puppyRaffle.enterRaffle{value: entranceFee * numOfPlayers}(playersSecond);
+        uint256 gasEndSecond = gasleft();
+        uint256 gasUsedSecond = gasStartSecond - gasEndSecond;
+        console.log("Gas Cost for the first 100 users: ", gasUsedFirst);
+        console.log("Gas Cost for the second 100 users: ", gasUsedSecond);
+        assert(gasUsedFirst < gasUsedSecond);
     }
 }

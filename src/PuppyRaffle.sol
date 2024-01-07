@@ -10,8 +10,8 @@ import {Base64} from "lib/base64/base64.sol";
 /// @author PuppyLoveDAO
 /// @notice This project is to enter a raffle to win a cute dog NFT. The protocol should do the following:
 /// 1. Call the `enterRaffle` function with the following parameters:
-///    1. `address[] participants`: A list of addresses that enter. You can use this to enter yourself multiple times, or yourself and a group of your friends.
-/// 2. Duplicate addresses are not allowed
+///!    1. `address[] participants`: A list of addresses that enter. You can use this to enter yourself multiple times, or yourself and a group of your friends.
+///! 2. Duplicate addresses are not allowed
 /// 3. Users are allowed to get a refund of their ticket & `value` if they call the `refund` function
 /// 4. Every X seconds, the raffle will be able to draw a winner and be minted a random puppy
 /// 5. The owner of the protocol will set a feeAddress to take a cut of the `value`, and the rest of the funds will be sent to the winner of the puppy.
@@ -83,6 +83,7 @@ contract PuppyRaffle is ERC721, Ownable {
         }
 
         // Check for duplicates
+        //!!! @audit-high Potential DoS attack by sending a large array of addresses.
         for (uint256 i = 0; i < players.length - 1; i++) {
             for (uint256 j = i + 1; j < players.length; j++) {
                 require(players[i] != players[j], "PuppyRaffle: Duplicate player");
@@ -98,7 +99,7 @@ contract PuppyRaffle is ERC721, Ownable {
         require(playerAddress == msg.sender, "PuppyRaffle: Only the player can refund");
         require(playerAddress != address(0), "PuppyRaffle: Player already refunded, or is not active");
 
-        payable(msg.sender).sendValue(entranceFee);
+        payable(msg.sender).sendValue(entranceFee); //!!! @audit-high Possibility of re-entrancy
 
         players[playerIndex] = address(0);
         emit RaffleRefunded(playerAddress);
@@ -122,21 +123,21 @@ contract PuppyRaffle is ERC721, Ownable {
     /// @dev we use a hash of on-chain data to generate the random numbers
     /// @dev we reset the active players array after the winner is selected
     /// @dev we send 80% of the funds to the winner, the other 20% goes to the feeAddress
-    function selectWinner() external {
+    function selectWinner() external { //? Do this function use chainlink automation for drawing winner ?
         require(block.timestamp >= raffleStartTime + raffleDuration, "PuppyRaffle: Raffle not over");
         require(players.length >= 4, "PuppyRaffle: Need at least 4 players");
         uint256 winnerIndex =
             uint256(keccak256(abi.encodePacked(msg.sender, block.timestamp, block.difficulty))) % players.length;
         address winner = players[winnerIndex];
-        uint256 totalAmountCollected = players.length * entranceFee;
+        uint256 totalAmountCollected = players.length * entranceFee; //? why not just use address(this).balance ?
         uint256 prizePool = (totalAmountCollected * 80) / 100;
         uint256 fee = (totalAmountCollected * 20) / 100;
-        totalFees = totalFees + uint64(fee);
+        totalFees = totalFees + uint64(fee); //? what this typecast do ?
 
         uint256 tokenId = totalSupply();
 
         // We use a different RNG calculate from the winnerIndex to determine rarity
-        uint256 rarity = uint256(keccak256(abi.encodePacked(msg.sender, block.difficulty))) % 100;
+        uint256 rarity = uint256(keccak256(abi.encodePacked(msg.sender, block.difficulty))) % 100; //!! Potential rng manipulation by using block.difficulty
         if (rarity <= COMMON_RARITY) {
             tokenIdToRarity[tokenId] = COMMON_RARITY;
         } else if (rarity <= COMMON_RARITY + RARE_RARITY) {
