@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.7.6;
+//ii use static version instead of floating
 
 import {ERC721} from "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
@@ -21,7 +22,7 @@ contract PuppyRaffle is ERC721, Ownable {
     uint256 public immutable entranceFee;
 
     address[] public players;
-    uint256 public raffleDuration;
+    uint256 public raffleDuration; //ii recommended to use immutable to save gas
     uint256 public raffleStartTime;
     address public previousWinner;
 
@@ -83,12 +84,13 @@ contract PuppyRaffle is ERC721, Ownable {
         }
 
         // Check for duplicates
-        //!!! @audit-high Potential DoS attack by sending a large array of addresses.
+        //!! @audit-high Potential DoS attack by sending a large array of addresses.
         for (uint256 i = 0; i < players.length - 1; i++) {
             for (uint256 j = i + 1; j < players.length; j++) {
                 require(players[i] != players[j], "PuppyRaffle: Duplicate player");
             }
         }
+        // todo : we probably don't want to emit an event if the provided array is empty
         emit RaffleEnter(newPlayers);
     }
 
@@ -97,7 +99,7 @@ contract PuppyRaffle is ERC721, Ownable {
     function refund(uint256 playerIndex) public {
         address playerAddress = players[playerIndex];
         require(playerAddress == msg.sender, "PuppyRaffle: Only the player can refund");
-        require(playerAddress != address(0), "PuppyRaffle: Player already refunded, or is not active");
+        require(playerAddress != address(0), "PuppyRaffle: Player already refunded, or is not active"); //?? What if someone put zero address when entering the raffle ?
 
         payable(msg.sender).sendValue(entranceFee); //!!! @audit-high Possibility of re-entrancy
 
@@ -114,6 +116,7 @@ contract PuppyRaffle is ERC721, Ownable {
                 return i;
             }
         }
+        //!! @audit-high This function will return 0 if the player is not active, but 0 is a valid index.
         return 0;
     }
 
@@ -123,16 +126,20 @@ contract PuppyRaffle is ERC721, Ownable {
     /// @dev we use a hash of on-chain data to generate the random numbers
     /// @dev we reset the active players array after the winner is selected
     /// @dev we send 80% of the funds to the winner, the other 20% goes to the feeAddress
-    function selectWinner() external { //? Do this function use chainlink automation for drawing winner ?
+    function selectWinner() external { 
         require(block.timestamp >= raffleStartTime + raffleDuration, "PuppyRaffle: Raffle not over");
         require(players.length >= 4, "PuppyRaffle: Need at least 4 players");
         uint256 winnerIndex =
-            uint256(keccak256(abi.encodePacked(msg.sender, block.timestamp, block.difficulty))) % players.length;
+            uint256(keccak256(abi.encodePacked(msg.sender, block.timestamp, block.difficulty))) % players.length; //!! Potential rng manipulation by using block.difficulty
         address winner = players[winnerIndex];
-        uint256 totalAmountCollected = players.length * entranceFee; //? why not just use address(this).balance ?
+        uint256 totalAmountCollected = players.length * entranceFee; //ii recommended to use address(this).balance instead
+        //ii magic numbers
+        //ii uint256 public constant PRIZE_POOL_PERCENTAGE = 80;
+        //ii uint256 public constant FEE_PERCENTAGE = 20;
+        //ii uint256 public constant FEE_PRECISION = 100;
         uint256 prizePool = (totalAmountCollected * 80) / 100;
         uint256 fee = (totalAmountCollected * 20) / 100;
-        totalFees = totalFees + uint64(fee); //? what this typecast do ?
+        totalFees = totalFees + uint64(fee); //!! Potential overflow / unsafe casting
 
         uint256 tokenId = totalSupply();
 
@@ -149,6 +156,8 @@ contract PuppyRaffle is ERC721, Ownable {
         delete players;
         raffleStartTime = block.timestamp;
         previousWinner = winner;
+        //ii There is a possibility of manipulating the rarity by reverting the receiver or fallback functions if the desired rarity is not obtained. However, this may not be profitable to do so.
+        //ii There is also the possibilit of revert if the receiving address is a contract that reverts the transaction or has a messed up receive or fallback function.
         (bool success,) = winner.call{value: prizePool}("");
         require(success, "PuppyRaffle: Failed to send prize pool to winner");
         _safeMint(winner, tokenId);
@@ -157,6 +166,8 @@ contract PuppyRaffle is ERC721, Ownable {
     /// @notice this function will withdraw the fees to the feeAddress
     function withdrawFees() external {
         require(address(this).balance == uint256(totalFees), "PuppyRaffle: There are currently players active!");
+        //! Mishandling ETH 
+        //! If there's arithmetic overflow from selectWinner(), this will hit.
         uint256 feesToWithdraw = totalFees;
         totalFees = 0;
         (bool success,) = feeAddress.call{value: feesToWithdraw}("");
@@ -171,6 +182,7 @@ contract PuppyRaffle is ERC721, Ownable {
     }
 
     /// @notice this function will return true if the msg.sender is an active player
+    //ii This function is not used anywhere
     function _isActivePlayer() internal view returns (bool) {
         for (uint256 i = 0; i < players.length; i++) {
             if (players[i] == msg.sender) {

