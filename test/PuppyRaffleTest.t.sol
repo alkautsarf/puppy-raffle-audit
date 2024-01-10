@@ -133,6 +133,16 @@ contract PuppyRaffleTest is Test {
         _;
     }
 
+    modifier playersEnteredWithZeroAddress() {
+        address[] memory players = new address[](4);
+        players[0] = playerOne;
+        players[1] = playerTwo;
+        players[2] = playerThree;
+        players[3] = address(0);
+        puppyRaffle.enterRaffle{value: entranceFee * 4}(players);
+        _;
+    }
+
     function testCantSelectWinnerBeforeRaffleEnds() public playersEntered {
         vm.expectRevert("PuppyRaffle: Raffle not over");
         puppyRaffle.selectWinner();
@@ -278,6 +288,14 @@ contract PuppyRaffleTest is Test {
         assert(expectedTotalFees != actualTotalFees);
         vm.expectRevert("PuppyRaffle: There are currently players active!");
         puppyRaffle.withdrawFees();
+    }
+
+    //! Zero address entering raffle
+    function test_select_winner_if_zero_address_included_in_players_array() public playersEnteredWithZeroAddress {
+        vm.warp(block.timestamp + duration + 1);
+        vm.roll(block.number + 1);
+        vm.expectRevert("ERC721: mint to the zero address");
+        puppyRaffle.selectWinner();
     }
 }
 
